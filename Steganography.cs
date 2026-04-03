@@ -9,7 +9,7 @@ public static class Steganography
 
     public static void EmbedFileInImage(byte[] fileData, Image<Rgba32> image, string outputPath)
     {
-        ValidateRequest(fileData, image, outputPath);
+        ValidateRequest(fileData, image);
 
         var bitIndex = 0;
         var payload = PreparePayload(fileData);
@@ -42,10 +42,8 @@ public static class Steganography
 
     public static byte[] ExtractFileFromImage(Image<Rgba32> image)
     {
-        var extractedBytes = AssembleBytesFromImage(image);
-
-        // 1. Extract the length from the first 4 bytes
-        var header = extractedBytes.Take(HeaderSizeInBytes).ToArray();
+        // Pass 1: extract only the header to determine file length
+        var header = ExtractBytesFromImage(image, HeaderSizeInBytes);
         if (BitConverter.IsLittleEndian)
         {
             Array.Reverse(header);
@@ -53,11 +51,13 @@ public static class Steganography
 
         var fileLength = BitConverter.ToInt32(header, 0);
 
-        // 2. Return the file data slice
-        return extractedBytes
-            .Skip(HeaderSizeInBytes)
-            .Take(fileLength)
-            .ToArray();
+        if (fileLength <= 0 || fileLength > (image.Width * image.Height * 3 / 8) - HeaderSizeInBytes)
+            throw new InvalidOperationException("No valid embedded file found, or data is corrupt.");
+
+        // Pass 2: extract header + file data now that we know the exact size
+        var payload = ExtractBytesFromImage(image, HeaderSizeInBytes + fileLength);
+
+        return payload.Skip(HeaderSizeInBytes).ToArray();
     }
 
     private static byte[] PreparePayload(byte[] fileData)
@@ -75,15 +75,16 @@ public static class Steganography
         return payload;
     }
 
-    private static List<byte> AssembleBytesFromImage(Image<Rgba32> image)
+    private static byte[] ExtractBytesFromImage(Image<Rgba32> image, int byteCount)
     {
-        var bytes = new List<byte>();
+        var result = new byte[byteCount];
+        var bytesWritten = 0;
         byte currentByte = 0;
         var bitCount = 0;
 
-        for (int column = 0; column < image.Height; column++)
+        for (int column = 0; column < image.Height && bytesWritten < byteCount; column++)
         {
-            for (int row = 0; row < image.Width; row++)
+            for (int row = 0; row < image.Width && bytesWritten < byteCount; row++)
             {
                 var pixel = image[row, column];
                 byte[] channels = [pixel.R, pixel.G, pixel.B];
@@ -95,7 +96,7 @@ public static class Steganography
 
                     if (bitCount == 8)
                     {
-                        bytes.Add(currentByte);
+                        result[bytesWritten++] = currentByte;
                         currentByte = 0;
                         bitCount = 0;
                     }
@@ -103,7 +104,7 @@ public static class Steganography
             }
         }
 
-        return bytes;
+        return result;
     }
 
     private static int GetBitFromPayload(IReadOnlyList<byte> data, int bitPosition)
@@ -114,18 +115,13 @@ public static class Steganography
         return (data[byteIndex] >> bitOffset) & 1;
     }
 
-    private static void ValidateRequest(IReadOnlyCollection<byte> fileData, Image image, string outputPath)
+    private static void ValidateRequest(IReadOnlyCollection<byte> fileData, Image image)
     {
         var availableBits = (long)image.Width * image.Height * 3;
         var requiredBits = (long)(HeaderSizeInBytes + fileData.Count) * 8;
         if (requiredBits > availableBits)
         {
             throw new InvalidOperationException($"The image is too small! Required: {requiredBits} bits, but only {availableBits} are available.");
-        }
-
-        if (!outputPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("Output must be PNG.");
         }
     }
 }
