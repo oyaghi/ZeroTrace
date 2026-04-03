@@ -7,7 +7,7 @@ public static class Steganography
 {
     private const int HeaderSizeInBytes = 4;
 
-    public static void HideFile(byte[] fileData, Image<Rgba32> image, string outputPath)
+    public static void EmbedFileInImage(byte[] fileData, Image<Rgba32> image, string outputPath)
     {
         var bitIndex = 0;
         var payload = PreparePayload(fileData);
@@ -22,7 +22,7 @@ public static class Steganography
 
                 for (int i = 0; i < channels.Length && bitIndex < totalBits; i++)
                 {
-                    var bit = GetBit(payload, bitIndex++);
+                    var bit = GetBitFromPayload(payload, bitIndex++);
                     channels[i] = (byte)((channels[i] & 0xFE) | bit);
                 }
 
@@ -38,9 +38,9 @@ public static class Steganography
         image.SaveAsPng(outputPath);
     }
 
-    public static byte[] Decode(Image<Rgba32> image)
+    public static byte[] ExtractFileFromImage(Image<Rgba32> image)
     {
-        var extractedBytes = ExtractAllPossibleBytes(image);
+        var extractedBytes = AssembleBytesFromImage(image);
 
         // 1. Extract the length from the first 4 bytes
         var header = extractedBytes.Take(HeaderSizeInBytes).ToArray();
@@ -69,10 +69,11 @@ public static class Steganography
         var payload = new byte[HeaderSizeInBytes + fileData.Length];
         Buffer.BlockCopy(lengthHeader, 0, payload, 0, HeaderSizeInBytes);
         Buffer.BlockCopy(fileData, 0, payload, HeaderSizeInBytes, fileData.Length);
+
         return payload;
     }
 
-    private static List<byte> ExtractAllPossibleBytes(Image<Rgba32> image)
+    private static List<byte> AssembleBytesFromImage(Image<Rgba32> image)
     {
         var bytes = new List<byte>();
         byte currentByte = 0;
@@ -99,13 +100,15 @@ public static class Steganography
                 }
             }
         }
+
         return bytes;
     }
 
-    private static int GetBit(IReadOnlyList<byte> data, int bitPosition)
+    private static int GetBitFromPayload(IReadOnlyList<byte> data, int bitPosition)
     {
         var byteIndex = bitPosition / 8;
         var bitOffset = 7 - (bitPosition % 8);
+
         return (data[byteIndex] >> bitOffset) & 1;
     }
 }
