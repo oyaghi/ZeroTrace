@@ -9,6 +9,8 @@ public static class Steganography
 
     public static void EmbedFileInImage(byte[] fileData, Image<Rgba32> image, string outputPath)
     {
+        ValidateRequest(fileData, image, outputPath);
+
         var bitIndex = 0;
         var payload = PreparePayload(fileData);
         var totalBits = payload.Length * 8;
@@ -110,5 +112,20 @@ public static class Steganography
         var bitOffset = 7 - (bitPosition % 8);
 
         return (data[byteIndex] >> bitOffset) & 1;
+    }
+
+    private static void ValidateRequest(IReadOnlyCollection<byte> fileData, Image image, string outputPath)
+    {
+        var availableBits = (long)image.Width * image.Height * 3;
+        var requiredBits = (long)(HeaderSizeInBytes + fileData.Count) * 8;
+        if (requiredBits > availableBits)
+        {
+            throw new InvalidOperationException($"The image is too small! Required: {requiredBits} bits, but only {availableBits} are available.");
+        }
+
+        if (!outputPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Output must be PNG.");
+        }
     }
 }
