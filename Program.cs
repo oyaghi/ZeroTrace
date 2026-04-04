@@ -5,7 +5,6 @@ using System.Text;
 using ZeroTrace;
 using Color = Spectre.Console.Color;
 
-// 1. App Loop: Keep the app running until the user chooses "Exit"
 var keepRunning = true;
 while (keepRunning)
 {
@@ -31,19 +30,19 @@ while (keepRunning)
             continue;
     }
 
-    // Pause so the user can see the result before the screen clears
     AnsiConsole.WriteLine();
     AnsiConsole.MarkupLine("[grey]Press any key to return to menu...[/]");
     Console.ReadKey(true);
 }
 
+return;
+
 static void HandleEmbedFlow()
 {
-    // 1. Get the Secret Data
-    var dataType = AnsiConsole.Prompt(
-        new SelectionPrompt<string>()
-            .Title("What are you hiding?")
-            .AddChoices("Plain Text", "File"));
+    var dataType = AnsiConsole.Prompt
+    (
+        new SelectionPrompt<string>().Title("What are you hiding?").AddChoices("Plain Text", "File")
+    );
 
     byte[] dataToHide;
     if (dataType == "Plain Text")
@@ -52,41 +51,62 @@ static void HandleEmbedFlow()
     }
     else
     {
-        var path = GetFileOrPath("Select the [blue]Secret File[/]:", ["*.*"]);
-        if (path == "BACK")
+        var filePath = GetFileOrPath("Select the [blue]Secret File[/]:", ["*.*"]);
+        if (filePath == "BACK")
         {
             return;
         }
 
-        dataToHide = File.ReadAllBytes(path);
+        dataToHide = File.ReadAllBytes(filePath);
     }
 
-    // 2. Get the Container Image (Filtered to PNG/JPG)
-    string imagePath = GetFileOrPath("Select your [yellow]Container Image[/]:", [".png", ".txt"]); // You can use "*.png" here
-    if (imagePath == "BACK") return;
+    var imagePath = GetFileOrPath("Select your [yellow]Container Image[/]:", [".png", ".bmp", ".tiff", ".tga"]);
+    if (imagePath == "BACK")
+    {
+        return;
+    }
 
-    // 3. Process
-    AnsiConsole.Status().Start("Embedding...", _ => {
+    AnsiConsole.Status().Start("Embedding...", _ =>
+    {
         using var image = Image.Load<Rgba32>(imagePath);
-        Steganography.EmbedFileInImage(dataToHide, image, "output.png");
-    });
 
-    AnsiConsole.MarkupLine("[bold green]Success![/] Check [underline]output.png[/]");
+        var result = Steganography.EmbedFileInImage(dataToHide, image, "output.png");
+        if (!result.IsSuccess)
+        {
+            AnsiConsole.MarkupLine($"[red]{result.Message}[/]");
+            return;
+        }
+
+        AnsiConsole.MarkupLine("[bold green]Success![/] Check [underline]output.png[/]");
+    });
 }
+
 static void HandleExtractFlow()
 {
-    string imagePath = GetValidatedPath("Select [yellow]Encoded Image[/]:");
+    var imagePath = GetFileOrPath("Select [yellow]Encoded Image[/]:", [".png", ".bmp", ".tiff", ".tga"]);
+    if (imagePath == "BACK")
+    {
+        return;
+    }
 
     byte[]? hiddenData = null;
     AnsiConsole.Status().Start("Extracting payload...", _ =>
     {
         using var image = Image.Load<Rgba32>(imagePath);
-        hiddenData = Steganography.ExtractFileFromImage(image);
+
+        var result = Steganography.ExtractFileFromImage(image);
+        if (!result.IsSuccess)
+        {
+            AnsiConsole.MarkupLine($"[red]{result.Message}[/]");
+
+            return;
+        }
+
+        hiddenData = result.Value;
     });
 
     if (hiddenData == null || hiddenData.Length == 0)
     {
-        AnsiConsole.MarkupLine("[red]No data found or extraction failed.[/]");
         return;
     }
 
@@ -97,34 +117,20 @@ static void HandleExtractFlow()
 
     if (viewMode == "Show as Text")
     {
-        string msg = Encoding.UTF8.GetString(hiddenData);
+        var msg = Encoding.UTF8.GetString(hiddenData);
         AnsiConsole.Write(new Panel(msg).Header("Recovered Message").BorderColor(Color.Green));
     }
     else
     {
-        string fileName = AnsiConsole.Ask<string>("Enter filename to save (e.g., recovered.zip):");
+        var fileName = AnsiConsole.Ask<string>("Enter filename to save (e.g., recovered.zip):");
         File.WriteAllBytes(fileName, hiddenData);
+
         AnsiConsole.MarkupLine($"[green]File saved as {fileName}[/]");
     }
 }
 
-// Helper method to ensure paths are correct and files exist
-static string GetValidatedPath(string prompt)
-{
-    return AnsiConsole.Prompt(
-        new TextPrompt<string>(prompt)
-            .Validate(path =>
-            {
-                string cleaned = path.Trim('"');
-                return File.Exists(cleaned)
-                    ? ValidationResult.Success()
-                    : ValidationResult.Error("[red]File not found![/] Please try again.");
-            })).Trim('"');
-}
-
 static string GetFileOrPath(string promptTitle, string[] searchPattern)
 {
-    // 1. Get files and sort them alphabetically
     var files = Directory.GetFiles(Directory.GetCurrentDirectory())
         .Select(Path.GetFileName)
         .Where(file =>
@@ -140,21 +146,20 @@ static string GetFileOrPath(string promptTitle, string[] searchPattern)
         .OrderBy(f => f)
         .ToList();
 
-    // 2. Build the choices: Actions FIRST, then the files
     var choices = new List<string>
     {
         "[red]-- Go Back --[/]",
         "[yellow]-- Enter path manually / Drag & Drop --[/]"
     };
-    choices.AddRange(files!);
 
+    choices.AddRange(files!);
     var prompt = new SelectionPrompt<string>()
-        .Title(promptTitle)
         .PageSize(10)
         .EnableSearch()
+        .Title(promptTitle)
+        .AddChoices(choices)
         .SearchPlaceholderText("[grey]Type to filter files...[/]")
-        .MoreChoicesText("[grey](Move up and down to reveal more files)[/]")
-        .AddChoices(choices);
+        .MoreChoicesText("[grey](Move up and down to reveal more files)[/]");
 
     prompt.SearchHighlightStyle = new Style(foreground: Color.SpringGreen3);
 
@@ -166,7 +171,8 @@ static string GetFileOrPath(string promptTitle, string[] searchPattern)
 
     if (selection == "[yellow]-- Enter path manually / Drag & Drop --[/]")
     {
-        return AnsiConsole.Prompt(
+        return AnsiConsole.Prompt
+        (
             new TextPrompt<string>("Paste path or drag file here:")
                 .Validate(path => File.Exists(path.Trim('"'))
                     ? ValidationResult.Success()

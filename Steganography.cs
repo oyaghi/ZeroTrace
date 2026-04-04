@@ -7,19 +7,23 @@ public static class Steganography
 {
     private const int HeaderSizeInBytes = 4;
 
-    public static void EmbedFileInImage(byte[] fileData, Image<Rgba32> image, string outputPath)
+    public static Result<bool> EmbedFileInImage(byte[] fileData, Image<Rgba32> image, string outputPath)
     {
-        ValidateRequest(fileData, image);
+        var validationMessage = ValidateRequest(fileData, image);
+        if (validationMessage is not null)
+        {
+            return new() { IsSuccess = false, Message = validationMessage};
+        }
 
         var bitIndex = 0;
         var payload = PreparePayload(fileData);
         var totalBits = payload.Length * 8;
 
-        for (int column = 0; column < image.Height && bitIndex < totalBits; column++)
+        for (int row = 0; row < image.Height && bitIndex < totalBits; row++)
         {
-            for (int row = 0; row < image.Width && bitIndex < totalBits; row++)
+            for (int column = 0; column < image.Width && bitIndex < totalBits; column++)
             {
-                var pixel = image[row, column];
+                var pixel = image[column, row];
                 byte[] channels = [pixel.R, pixel.G, pixel.B];
 
                 for (int i = 0; i < channels.Length && bitIndex < totalBits; i++)
@@ -33,14 +37,16 @@ public static class Steganography
                 pixel.G = channels[1];
                 pixel.B = channels[2];
 
-                image[row, column] = pixel;
+                image[column, row] = pixel;
             }
         }
 
         image.SaveAsPng(outputPath);
+
+        return new() { IsSuccess = true, Message = "File embedded successfully!" };
     }
 
-    public static byte[] ExtractFileFromImage(Image<Rgba32> image)
+    public static Result<byte[]> ExtractFileFromImage(Image<Rgba32> image)
     {
         // Pass 1: extract only the header to determine file length
         var header = ExtractBytesFromImage(image, HeaderSizeInBytes);
@@ -50,16 +56,15 @@ public static class Steganography
         }
 
         var fileLength = BitConverter.ToInt32(header, 0);
-
         if (fileLength <= 0 || fileLength > (image.Width * image.Height * 3 / 8) - HeaderSizeInBytes)
         {
-            throw new InvalidOperationException("No valid embedded file found, or data is corrupt.");
+            return new(){IsSuccess = false, Message = "No valid embedded file found, or data is corrupt."};
         }
 
         // Pass 2: extract header + file data now that we know the exact size
         var payload = ExtractBytesFromImage(image, HeaderSizeInBytes + fileLength);
 
-        return payload.Skip(HeaderSizeInBytes).ToArray();
+        return new(){IsSuccess = true, Value = payload.Skip(HeaderSizeInBytes).ToArray()};
     }
 
     // combine the fileLength (header) and the fileData
@@ -87,11 +92,11 @@ public static class Steganography
         byte currentByte = 0;
         var bitCount = 0;
 
-        for (int column = 0; column < image.Height && bytesWritten < byteCount; column++)
+        for (int row = 0; row < image.Height && bytesWritten < byteCount; row++)
         {
-            for (int row = 0; row < image.Width && bytesWritten < byteCount; row++)
+            for (int column = 0; column < image.Width && bytesWritten < byteCount; column++)
             {
-                var pixel = image[row, column];
+                var pixel = image[column, row];
                 byte[] channels = [pixel.R, pixel.G, pixel.B];
 
                 foreach (var channel in channels)
@@ -122,13 +127,11 @@ public static class Steganography
         return (data[byteIndex] >> bitOffset) & 1;
     }
 
-    private static void ValidateRequest(IReadOnlyCollection<byte> fileData, Image image)
+    private static string? ValidateRequest(IReadOnlyCollection<byte> fileData, Image image)
     {
         var availableBits = (long)image.Width * image.Height * 3;
         var requiredBits = (long)(HeaderSizeInBytes + fileData.Count) * 8;
-        if (requiredBits > availableBits)
-        {
-            throw new InvalidOperationException($"The image is too small! Required: {requiredBits} bits, but only {availableBits} are available.");
-        }
+
+        return requiredBits > availableBits ? $"The image is too small! Required: {requiredBits} bits, but only {availableBits} are available." : null;
     }
 }
