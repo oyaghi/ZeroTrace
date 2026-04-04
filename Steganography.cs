@@ -99,9 +99,9 @@ public static class Steganography
                 var pixel = image[column, row];
                 byte[] channels = [pixel.R, pixel.G, pixel.B];
 
-                foreach (var channel in channels)
+                for (int i = 0; i < channels.Length && bytesWritten < byteCount; i++)
                 {
-                    currentByte = (byte)((currentByte << 1) | (channel & 1));
+                    currentByte = (byte)((currentByte << 1) | (channels[i] & 1));
                     bitCount++;
 
                     if (bitCount == 8)
