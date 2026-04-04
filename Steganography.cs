@@ -52,7 +52,9 @@ public static class Steganography
         var fileLength = BitConverter.ToInt32(header, 0);
 
         if (fileLength <= 0 || fileLength > (image.Width * image.Height * 3 / 8) - HeaderSizeInBytes)
+        {
             throw new InvalidOperationException("No valid embedded file found, or data is corrupt.");
+        }
 
         // Pass 2: extract header + file data now that we know the exact size
         var payload = ExtractBytesFromImage(image, HeaderSizeInBytes + fileLength);
@@ -60,9 +62,12 @@ public static class Steganography
         return payload.Skip(HeaderSizeInBytes).ToArray();
     }
 
+    // combine the fileLength (header) and the fileData
     private static byte[] PreparePayload(byte[] fileData)
     {
         var lengthHeader = BitConverter.GetBytes(fileData.Length);
+        // reverse the byte order if the system is little endian
+        // since the file length is stored in network byte order (big endian)
         if (BitConverter.IsLittleEndian)
         {
             Array.Reverse(lengthHeader);
@@ -109,9 +114,11 @@ public static class Steganography
 
     private static int GetBitFromPayload(IReadOnlyList<byte> data, int bitPosition)
     {
+        // finding the byte that our bit belongs to and bit offset
         var byteIndex = bitPosition / 8;
         var bitOffset = 7 - (bitPosition % 8);
 
+        // masking the output leaving only the last bit of the byte
         return (data[byteIndex] >> bitOffset) & 1;
     }
 
